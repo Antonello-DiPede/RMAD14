@@ -1,5 +1,4 @@
 import struct
-
 # ╔══════════════════════════════════════════════════════════════════════════════╗
 # ║              ASM → PYTHON  CHEATSHEET  (da chal00 a chal05)                ║
 # ║  Formato:  python_equivalente   --   istruzione_asm                        ║
@@ -271,7 +270,7 @@ def rol(v, n, bits=8):
         return v & 0xFF
     return ((v << n) | (v >> (bits - n))) & 0xFF
 def u8(v):             return v & 0xFF #get last 8 bits
-
+def u16(v):             return v & 0xFFFF #get last 8 bits
 
 def shl(v, n, bits=64): return (v << n) & ((1 << bits) - 1)
 def shr(v, n, bits=64): return (v >> n) & ((1 << bits) - 1)
@@ -285,283 +284,6 @@ def print_result(mem, start, length, prefix="RevMal"):
     print(f"[hex]    {raw.hex()}")
     print(f"[ascii]  {s}")
     print(f"[flag]   {prefix}{{{s}}}")
-
-
-# ═════════════════════════════════════════════
-#  SCENARIO — cambia solo questa sezione
-#  Valori: 1, 2, 3
-# ═════════════════════════════════════════════
-
-SCENARIO = 2
-
-
-# ─────────────────────────────────────────────
-#  SCENARIO 1 — Setup → Loop → Print
-# ─────────────────────────────────────────────
-#
-#  Struttura assembly tipica:
-#    movabs rax, VAL1
-#    mov    [rsp+OFF1], rax
-#    movabs rax, VAL2        ← sovrascrive parzialmente
-#    mov    [rsp+OFF2], rax
-#    lea rdx, [rsp+X]
-#    lea rcx, [rsp+Y]
-#    lea rsi, [rsp+Z]
-#    sub edi, edx
-#    --- loop ---
-#    lea eax, [rdi+rdx]
-#    xor al, byte [rdx]
-#    add rdx, 1
-#    sub rcx, 1
-#    ror al, N
-#    mov byte [rcx+1], al
-#    cmp rdx, rsi
-#    jne loop
-#
-def scenario_1():
-    mem = bytearray(0x18) #sub rsp, 0x18
-
-    # ── SETUP ────────────────────────────────
-    # Cambia: offset e valori hex dei movabs
-    movabs(mem, 0x01, 0x1435262A0F292408)   # mov qword [rsp+1], rax
-    movabs(mem, 0x08, 0x171604302B2B14)   # mov qword [rsp+8], rax
-
-    # Registri iniziali — adatta agli offset nel codice
-    rdx = 0x00                   # xor edx, edx
-    rsi = 0x01                 # lea rsi, [rsp+0x01]  ← buffer di destinazione (dove scrive il loop)
-    rcx = 0x01                 #  mov rcx, rsi 
-    eax = 0x47                # mov eax, 0x47
-
-    # ── LOOP ─────────────────────────────────
-    # Reproduce the cycle
-    while rdx != 0x0e:
-        mem[rcx]  = u8(mem[rcx] ^ eax) #u8 becasue  al is involved in the operation and is 1 byte, 
-        #while eax is 4 byte
-        eax = eax +3               
-        rcx += 1                  
-        eax = eax ^ rdx
-        rdx+= 1         
-
-    # ── OUTPUT ───────────────────────────────
-    # Cambia: offset start = dove punta rdi nel printf, length = num byte
-    # start è il primo offset dove veiene scritto rax ovvero rsp + 1 e poi la legnth vedi il ciclo  
-    print_result(mem, start=0x01, length=0x0e)
-
-
-# ─────────────────────────────────────────────
-#  SCENARIO 2 — Setup → Loop1 → Clean → Loop2 → Print
-# ─────────────────────────────────────────────
-#
-#  Struttura assembly tipica:
-#    [setup identico a scenario 1]
-#    --- loop 1 ---
-#    [trasformazione byte → buffer intermedio]
-#    xor ecx, ecx   ← clean
-#    xor edx, edx
-#    lea rdi, [rsp+NEW_OFFSET]
-#    --- loop 2 ---
-#    [seconda trasformazione]
-#
-def scenario_2():
-    mem = bytearray(0x38)
-
-    # ── SETUP ────────────────────────────────
-    movabs(mem, 0x04, 0xDAA40A861E9F81CD)
-    movabs(mem, 0x0a, 0x44CC75E1CB45DAA4)
-
-    edi = 0xFFFFFFA5
-    rdx = 0x04
-    rcx = 0x1f
-    rsi = 0x12
-    edi = u8(edi - rdx)
-
-    # ── LOOP 1 ───────────────────────────────
-    while rdx != rsi:
-        eax = u8(edi + rdx)
-        al  = u8(eax ^ mem[rdx]) 
-        rdx += 1
-        rcx -= 1
-        al  = ror(al, 3) 
-        mem[rcx + 1] = al
-
-    # ── CLEAN ────────────────────────────────
-    # Cambia: nuovi valori di registro dopo il reset
-    ecx = 0                       # xor ecx, ecx
-    edx = 0                       # xor edx, edx
-    rdi = 0x21                    # lea rdi, [rsp+0x21]  ← nuovo dest
-    rsi2 = 0x12                   # rsi rimane il buffer intermedio
-
-    # ── LOOP 2 ───────────────────────────────
-    # Cambia: limite (0x0e), costante SUB step (7), ROR (1), XOR (0x3c)
-    while edx != 0x0e:            # cmp rdx, 0xe
-        al  = mem[rsi2 + edx]     # movzx eax, byte [rsi+rdx]
-        al  = u8(al - ecx)        # sub eax, ecx
-        ecx = u8(ecx + 7)         # add ecx, 7  ← cambia step
-        al  = ror(al, 1)          # ror al, 1   ← cambia N
-        al  = u8(al ^ 0x3c)       # xor eax, 0x3c  ← cambia K
-        mem[rdi + edx] = al       # mov byte [rdi+rdx], al
-        edx += 1
-
-    # ── OUTPUT ───────────────────────────────
-    print_result(mem, start=rdi, length=0x0e)
-
-
-# ─────────────────────────────────────────────
-#  SCENARIO 3 — Main chiama sub_XXXX esterne
-# ─────────────────────────────────────────────
-#
-#  Struttura assembly tipica:
-#    movabs ...
-#    call sub_1260   ← copia dati
-#    call sub_1240   ← riordina/ruota struttura
-#    call sub_1220   ← XOR con chiave crescente
-#    call sub_11f0   ← swap/reverse
-#    call sub_11d0   ← ROL/ROR + XOR finale
-#    printf(rdi)
-#
-#  Aggiungi/rimuovi funzioni in base alle sub che vedi
-#
-
-def sub_1260(mem, rdi):
-    eax = 0 
-    """Copia N byte da [rsp+rsi] a [rdi]"""
-    rsi = 0x05
-    n   = 0x0d 
-    for i in range(n): # i act as eax 
-        mem[rdi + i] = mem[rsi + i]
-
-def sub_1240(mem, rdi):
-    """Rotazione struttura: sposta un blocco all'inizio"""
-    # mov rcx, [rdi+5]  /  mov edx, [rdi]  /  movzx eax, [rdi+4]
-    # poi riscrive in ordine: rcx, edx, al
-    # Cambia: offset 5, 4, 0xc in base al codice
-    rcx = bytes(mem[rdi+5 : rdi+5+8]) # mov rcx, qword [rdi+5]
-    edx = bytes(mem[rdi   : rdi+4]) # mov edx, dword [rdi]
-    al  = mem[rdi+4] # movzx eax, byte [rdi+4]  -> al è la parte bassa di eax, quindi prendo solo 1 byte
-    mem[rdi+8    : rdi+12] = edx #mov dword [rdi+8], edx
-    mem[rdi      : rdi+8 ] = rcx #mov qword [rdi], rcx
-    mem[rdi+0x0c]           = al # mov byte [rdi+0xc], al
-
-def sub_1220(mem, rdi):
-    """XOR con chiave crescente — cmp al, STOP"""
-    # Cambia: start (0x3d), step (0x11), n (0x0d)
-    eax = 0x3d
-    while (eax != 0x1a):
-        mem[rdi] = u8(mem[rdi] ^ eax)
-        eax = u8(eax + 0x11)       # add eax, 0x11
-        rdi += 1
-
-def sub_11f0(mem, rdi):
-    """Reverse/swap a due puntatori verso il centro"""
-    # Cambia: 0x0c (indice fine), 6 (centro)
-
-    rax = rdi + 0x0c 
-    rsi = rdi + 6
-
-    while rax  != rsi:
-        edx = mem[rdi]
-        ecx = mem[rax]
-        rax -= 1
-        rdi += 1 
-        mem [rdi -1] = u8(ecx) # mem[rdi-1] = ecx
-        mem [rax +1] = u8(edx)
-
-
-def sub_11d0(mem, rdi):
-    """ROL N + XOR K su ogni byte"""
-    # Cambia: 0x0d (n), rol(al, 4), 0x55
-    rdx  = rdi + 0x0d
-    while rdi != rdx:
-        al = mem[rdi]
-        rdi += 1 
-        al = rol(al, 4)      # cambia N
-        al = u8(al ^ 0x55)         # cambia K
-        mem[rdi - 1] = al
-
-def scenario_3():
-    mem = bytearray(0x28) #sub rsp, 0x28
-
-    # ── SETUP ────────────────────────────────
-    # Cambia: offset e valori hex
-    movabs(mem, 0x05, 0x5dfd2e795be565d6) # mov qword [rsp + 5], rax 
-    movabs(mem, 0x0a, 0xf51081f1d35dfd2e) # mov qword [rsp + 0xa], rax 
-   
-    r8 = 0x12
-    rsi = 0x05                    # lea rsi, [rsp+0x05]
-    rdi = r8              # lea r8, [rsp+0x12] → poi mov rdi, r8
-    mem[0x12:0x12+8] = bytes(8)    # mov qword [rsp+0x12], 0
-    mem[0x18:0x18+8] = bytes(8)    # mov qword [rsp+0x18], 0
-
-
-    # ── CHIAMA LE FUNZIONI ────────────────────
-    # Cambia: ordine e nomi in base al grafo del main
-    sub_1260(mem, rdi)
-    sub_1240(mem, rdi)
-    sub_1220(mem, rdi)
-    rdi = r8 
-    sub_11f0(mem, rdi)
-    rdi = r8
-    sub_11d0(mem, rdi)
-
-    # ── OUTPUT ───────────────────────────────
-    print_result(mem, start=rdi, length=0x0d)
-
-# ─────────────────────────────────────────────
-# SCENARIO 4
-# ─────────────────────────────────────────────
-
-def sub_12f0(mem, rdi, rsi):
-
-
-    mem[rdi+32 : rdi+40] = (0xd).to_bytes(8, byteorder='little') # mov qword [rdi+0x20], 0xd
-
-    eax = 0 
-    while(eax != 0x0d):
-        edx = mem[rsi + eax] #movzx edx, byte   [rsi+rax]
-        mem[rdi + eax] = u8(edx) #mov byte [rdi+rax], dl
-        eax += 1
-
-    return
-
-def sub_1210(mem, rdi, rsi):
-
-    rax = int.from_bytes(mem[rdi+0x20 : rdi+0x28], 'little') # mov rax, qword [rdi+0x20]
-    if rax == 1:
-        return
-    
-
-    rax = shr(rax, 1, bits=64) #shr rax, 1 ; 
-    rcx = rdi + rax*2
-
-    while(rdi != rcx):
-        rax = mem[rdi] 
-        edx = mem[rdi+1]
-        rdi = rdi + 2 
-        mem [rdi -2 ] = edx
-        mem [rdi -1 ] = rax
-
-    return
-
-def sub_1260_b(mem, rdi, rsi):
-
-    rdx = int.from_bytes(mem[rdi+0x20 : rdi+0x28], 'little') # mov rax, qword [rdi+0x20]
-
-    if (rdx == 0):
-        return
-    
-    eax = rdx + rdx*8
-    eax = rdx + eax*2
-
-    rdx = rdx + rdi 
-
-    while(rdi != rdx):
-        mem[rdi]  = u8(mem[rdi] ^ eax) # xor byte [rdi], al
-        rdi += 1
-        eax = eax + 7 
-
-
-    return
-
 
 def mul_r10_sim(r10, rax):
     """
@@ -578,94 +300,246 @@ def mul_r10_sim(r10, rax):
 
     return rax, rdx
 
+def mul128(a, b):
+    return mul_r10_sim(a,b)
 
-def sub_1200(edi, rsi):
 
-    al = edi & 0xFF # Get LAST BYTE 
-    cl = rsi & 0xFF
-    al = ror(al, cl, bits=8)
 
-    return  al
+# ═════════════════════════════════════════════
+#  SCENARIO — cambia solo questa sezione
+#  Valori: 1, 2, 3
+# ═════════════════════════════════════════════
 
-def sub_1290(mem, rdi, rsi):
+SCENARIO = 8
 
-    r9 = int.from_bytes(mem[rdi+0x20 : rdi+0x28], 'little') # mov r9, qword [rdi+0x20]
-    r11 = rdi 
-    r8d = 0 
-    r10 = 0xaaaaaaaaaaaaaaab
+# EXAM00================================================================================
 
-    if (r9 == 0):
-        return 
+
+def sub_1370(mem, rdi, rsi):
+
+    eax = 0 
     
+    while(eax != 0xa):
 
-    while (r8d != r9):
-        rax = r8d 
-        rsi = r8d
-        edi = mem[r11 + r8d]
-        rax , rdx = mul_r10_sim(r10, rax) # mul r10 
-        rax = rdx 
-        rdx = rdx & 0xfffffffffffffffe
-        rax = shr(rax, 1, bits=64) #shr rax, 1
-        rdx = rdx + rax
-        rsi = rsi - rdx 
-        rsi = rsi + 1 
+        edx = mem[rsi+eax]
+        mem[rdi + eax ] = u8(edx)
+        eax += 1
 
-        #here pass edi not rdi sinde rdi has the pointer edi the data
-        rax = sub_1200(edi, rsi) # sub_1200(rdi, rsi)
-        
-        rax = rax - r9
-        rax = rax + r8d
-        mem[r11 + r8d] = u8(rax) #mov byte [r11+r8d], al
-        r8d = r8d + 1
+    return 
 
+def sub_1360(mem, rdi, rsi):
+
+    rax = rdi + 9
+    rsi = rdi + 4 
+
+    while(rax != rsi):
+        edx = mem[rdi]
+        ecx = mem[rax]
+        rax = rax -1 
+        rdi = rdi + 1
+        mem[rdi -1] = u8(ecx)
+        mem[rax +1] = u8(edx)
+    return
+
+def sub_1320(mem, rdi, rsi):
+
+    rcx = rdi + 0xa 
+
+    while (rdi != rcx): 
+        eax = mem[rdi]
+        edx = mem[rdi +1]
+        rdi = rdi + 2
+        mem[rdi-2] = u8(edx)
+        mem[rdi -1] = u8(eax)
 
     return
 
 
-def scenario_4():
 
-    mem = bytearray(0x40) #sub rsp, 0x28
+def sub_12c0(mem,rdi ,rsi):
 
-    # ── SETUP ────────────────────────────────
-    # Cambia: offset e valori hex
-    movabs(mem, 0x0b, 0xb1f9aac98eec69f8) # mov qword [rsp + 5], rax 
-    rsi = 0x0b                    # lea rsi, [rsp+0x05]
-    rdi = 0x18              # lea rdi,  [rsp+0x18]
-    movabs(mem, 0x10, 0x878ca76498b1f9aa) # mov qword [rsp + 0xa], rax 
+    esi = 0x21
+    rax = rdi + 0xa
+    while rdi != rax :
+        mem[rdi] = u8(mem[rdi] ^ u8(esi))
+        mem[rdi + 1] = u8(mem[rdi + 1] ^ u8(esi))
+        rdi = rdi +2 
 
-    mem[0x18:0x18+8] = bytes(8)    # mov qword [rsp+0x18], 0
-    mem[0x20:0x20+8] = bytes(8)    # mov qword [rsp+0x20], 0
-    mem[0x28:0x28+8] = bytes(8)    # mov qword [rsp+0x28], 0
-    mem[0x30:0x30+8] = bytes(8)    # mov qword [rsp+0x30], 0
+    return
 
+def sub_1280(mem,rdi ,rsi):
 
-    # ── CHIAMA LE FUNZIONI ────────────────────
-    sub_12f0(mem, rdi, rsi)
-    sub_1210(mem, rdi, rsi)
-    rdi  = 0x18
-    sub_1260_b(mem, rdi, rsi)
-    rdi  = 0x18
-    sub_1290(mem, rdi, rsi)
+    eax = 0
+    while eax != 0xa :
+        mem[rdi+eax] =u8(mem[rdi+eax] - u8(eax))
+        rdx = eax + 1
+        eax += 2
+        mem[rdi+rdx] =u8(mem[rdi+rdx] - u8(rdx))
+
+    return
 
 
-    # ── OUTPUT ───────────────────────────────
-    print_result(mem, start=rdi, length=0x0d)
+def sub_1240(mem,rdi,rsi):
 
+    rax = rdi + 0xa
 
-def scenario_5_exam1():
+    while(rdi != rax): 
+        mem[rdi] = u8(mem[rdi] + 3)
+        mem[rdi +1 ] = u8(mem[rdi+1] + 3)
+        rdi += 2
 
 
     return
 
-def scenario_6_exam2():
+def sub_12d0(esi):
+
+    esi = 0x10
+    return esi
+
+def sub_1200(mem,rdi,rsi):
+    mem[rdi + 0xa] = u8(0x0)
+    return
+
+
+def scenario_5_exam00():
+
+    #TO FIX
+
+    mem = bytearray(0x28)
+    rsi = 0xb
+    rdi = 0x15
+    movabs(mem, 0xb, 0x48435471a15548a0)
+    mem[0x13:0x15] = struct.pack('<H', 0x4e53)  # word, non movabs
+    mem[0x15 : 0x15+8]  = (0x0).to_bytes(8,'little')
+    mem[0x1c : 0x1c+4]  = (0x0).to_bytes(4,'little')
+
+    sub_1370(mem,rdi,rsi)
+    sub_1360(mem,rdi,rsi)
+    rdi = 0x15
+    sub_1320(mem,rdi,rsi)
+    rdi = 0x15
+    sub_12c0(mem,rdi,rsi)
+    rdi = 0x15
+    sub_1280(mem, rdi, rsi)
+    sub_1240(mem,rdi,rsi)
+    rdi = 0x15
+    rsi = 0x10
+    rdi = 0x15
+    mem[rdi + 0xa] = 0x0
+    rdx = rdi 
+
+
+    print_result(mem, start=rdi, length=0x0a)
 
 
     return
 
-def scenario_7_exam2():
+# EXAM01================================================================================
+
+def sub_1200b(mem, rdi, rsi):
+    # reverse copy: rsi+9..rsi+0 → rdi+0..rdi+9
+    rax = 0
+    while rax != 0xa:
+        edx = mem[rsi + 9 - rax]       # movzx edx, byte [rsi+rdx+9]  (neg rdx)
+        mem[rdi + rax] = u8(edx)       # mov byte [rdi+rax], dl
+        rax += 1
+
+def sub_11c0b(mem, rdi, rsi):
+    edx = 0x39                          # mov edx, 0x39
+    rax = 0                             # xor eax, eax
+    while rax != 0xa:                   # cmp rax, 0xa / jne
+        mem[rdi+rax] = u8(mem[rdi+rax] ^ (edx & 0xFF))   # xor byte [rdi+rax], dl
+        edx = ((edx + 5) ^ rax) & 0xFFFFFFFF              # add edx,5 / xor edx,eax
+        rax += 1
+
+def scenario_6_exam01():
+    mem = bytearray(0x40)
+
+    movabs(mem, 0x0b, 0x23281e2b38243c36)       # mov qword [rsp+0x0b], rax
+    mem[0x13:0x15] = struct.pack('<H', 0x7c46)  # mov word  [rsp+0x13], ax
+    rsi = 0x0b
+    rdi = 0x15
+    mem[0x15:0x15+8] = bytes(8)
+    mem[0x1c:0x1c+4] = bytes(4)
+
+    sub_1200b(mem, rdi, rsi)
+    rdi = 0x15
+    sub_11c0b(mem, rdi, rsi)
+
+    
+    print_result(mem, start=rdi, length=0x0f)
 
 
+# EXAM02================================================================================
+
+
+def scenario_7_exam02():
+
+    #TODO 
     return
+
+
+# EXAM03================================================================================
+
+def sub_11f0C(edi, esi):          # ror al, cl
+    al = edi & 0xFF
+    cl = esi & 0xFF
+    return ror(al, cl, bits=8)
+
+def sub_1270C(mem, rdi, rsi):
+    mem[rdi+0x40:rdi+0x48] = (0xd).to_bytes(8, 'little')  # length = 13
+    r9  = rsi                   # source ptr
+    r8  = rdi + 0x0c            # dest ptr (decrements)
+    edx = 0xFFFFFFA0            # rolling XOR key
+
+    while True:
+        edi = mem[r9]                           # load source byte
+        r9 += 1
+        r8 -= 1
+        edi = u8(edi ^ (edx & 0xFF))            # xor edi, edx
+        edx = (edx + 3) & 0xFFFFFFFF           # key += 3
+        al  = sub_11f0C(edi & 0xFF, 3)           # ror al, 3
+        mem[r8 + 1] = al                        # store reversed
+        if (edx & 0xFF) == 0xc7: break          # stop condition
+
+def sub_1200C(mem, rdi, rsi):
+    r10 = int.from_bytes(mem[rdi+0x40:rdi+0x48], 'little')
+    if r10 == 0: return
+
+    r8d = 0
+    r9d = 0x31
+    r11 = 0xaaaaaaaaaaaaaaab
+
+    while r8d < r10:
+        edi   = mem[rdi + r8d]
+        rsi_v = r8d
+        _, rdx_v = mul128(r11, r8d)             # mul r11 (div by 3 trick)
+        edi = u8(edi ^ r9d)                     # xor edi, r9d
+        r9d = (r9d + 0x13) & 0xFFFFFFFF        # r9d += 0x13
+        rdx_v2 = (rdx_v & 0xfffffffffffffffe) + (rdx_v >> 1)
+        r9d = r9d ^ (r8d & 0xFFFFFFFF)         # xor r9d, r8d
+        rsi_v = ((rsi_v - rdx_v2) & 0xFFFFFFFF) + 1   # rotation = i%3+1
+        al = sub_11f0C(edi, rsi_v)              # ror al, cl
+        al = u8(al - (r8d * 5))               # sub eax, edx  (lea edx,[r8+r8*4])
+        al = u8(al ^ 0x5a)                     # xor eax, 0x5a
+        mem[rdi + r8d + 0x20] = al
+        r8d += 1
+
+def scenario_8_exam03():
+    mem = bytearray(0x80)
+
+    movabs(mem, 0x0b, 0x4127eb3495da0ef)    # mov qword [rsp+0x0b], rax
+    movabs(mem, 0x10, 0xada5c3611b04127e)   # mov qword [rsp+0x10], rax
+    rsi = 0x0b
+    rdi = 0x18
+    for off in [0x18,0x20,0x28,0x30,0x38,0x40,0x48,0x50]:
+        mem[off:off+8] = bytes(8)
+
+    sub_1270C(mem, rdi, rsi)
+    rdi = 0x18
+    sub_1200C(mem, rdi, rsi)
+
+    print_result(mem,start=rdi+0x20,length=0x0d)
 
 
 
@@ -678,14 +552,11 @@ if __name__ == "__main__":
     print(f"  ASM CTF Solver — Scenario {SCENARIO}")
     print(f"{'═'*45}\n")
 
-    if   SCENARIO == 1: scenario_1()
-    elif SCENARIO == 2: scenario_2()
-    elif SCENARIO == 3: scenario_3()
-    elif SCENARIO == 4: scenario_4()
-    elif SCENARIO == 5: scenario_5_exam1()
-    elif SCENARIO == 6: scenario_6_exam2()
-    elif SCENARIO == 7: scenario_7_exam2()
+    if   SCENARIO == 5: scenario_5_exam00()
+    elif SCENARIO == 6: scenario_6_exam01()
+    elif SCENARIO == 7: scenario_7_exam02()
+    elif SCENARIO == 8: scenario_8_exam03()
     
-    else: print("SCENARIO non valido. Scegli 1, 2 o 3.")
+    else: print("SCENARIO non valido. Scegli 5, 6, 7, 8.")
 
     print()
