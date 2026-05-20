@@ -6,7 +6,7 @@
 # ═══════════════════════════════════════════════════════════════
 
 INPUT_NAME  = "buterat"          # <─ change this
-OUTPUT_DIR  = "C:\\Users\\Public\\"
+OUTPUT_DIR  = "C:\\Users\\dude\\LL"
 NUM_DECOMP_PARTS = 4
 
 # ───────────────────────────────────────────────────────────────
